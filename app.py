@@ -73,8 +73,8 @@ if st.button("Recommend"):
     with st.spinner("Fetching recommendations..."):
         recommendation, posters = recommend(selected_movie_name)
 
-    cols = st.columns(5)
-    for i in range(5):
+    cols = st.columns(6)
+    for i in range(6):
         with cols[i]:
             st.text(recommendation[i])
             st.image(posters[i])
