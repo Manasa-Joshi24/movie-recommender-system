@@ -1,4 +1,5 @@
 import pickle
+import gzip
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -57,7 +58,9 @@ def recommend(movie: str):
     return recommended_movies, recommended_movies_posters
 
 
-movies_dict = pickle.load(open("movies_dict.pkl.gz", "rb"))
+movies_dict = pickle.load(
+    gzip.open('movies_dict.pkl.gz', 'rb')
+)
 movies = pd.DataFrame(movies_dict)
 similarity = pickle.load(open("similarity.pkl", "rb"))
 
