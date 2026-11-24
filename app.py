@@ -1,80 +1,112 @@
 import pickle
-import gzip
-import pandas as pd
+import time
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import streamlit as st
+
 TMDB_API_KEY = st.secrets["TMDB_API_KEY"]
 
 
-def create_session() -> requests.Session:
-    session = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    session.headers.update({"User-Agent": "Mozilla/5.0 (MovieRecommenderApp)"})
-    return session
-
-
-HTTP_SESSION = create_session()
-PLACEHOLDER_POSTER = "https://via.placeholder.com/500x750?text=No+Poster"
-
-
 @st.cache_data(show_spinner=False)
-def fetch_poster(movie_id: int) -> str:
+def fetch_poster(movie_id: int) -> str | None:
     url = f"https://api.themoviedb.org/3/movie/{movie_id}"
-    params = {"api_key": TMDB_API_KEY}
-    try:
-        response = HTTP_SESSION.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        poster_path = data.get("poster_path")
-        if poster_path:
-            return f"https://image.tmdb.org/t/p/w500/{poster_path}"
-    except requests.RequestException:
-        pass
-    return PLACEHOLDER_POSTER
+    params = {"api_key": TMDB_API_KEY, "language": "en-US"}
+
+    with requests.Session() as session:
+        for attempt in range(2):
+            try:
+                response = session.get(
+                    url, params=params, timeout=10
+                )
+                response.raise_for_status()
+
+                poster_path = response.json().get("poster_path")
+
+                if poster_path:
+                    return f"https://image.tmdb.org/t/p/w500{poster_path}"
+
+                return None
+
+            except requests.RequestException:
+                if attempt == 0:
+                    time.sleep(0.5)
+
+    return None
 
 
-def recommend(movie: str):
-    movie_index = movies[movies["title"] == movie].index[0]
-    distances = similarity[movie_index]
-    movies_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
+movies_df = pickle.load(open("movies.pkl", "rb"))
+movie_titles = movies_df["title"].values
+similarity = pickle.load(open("similarity.pkl", "rb"))
+
+
+def recommend(movie):
+    movie_idx = movies_df[
+        movies_df["title"] == movie
+    ].index[0]
+
+    movies_lists = similarity[movie_idx]
 
     recommended_movies = []
-    recommended_movies_posters = []
-    for i in movies_list:
-        movie_id = int(movies.iloc[i[0]].movie_id)
-        recommended_movies.append(movies.iloc[i[0]].title)
-        recommended_movies_posters.append(fetch_poster(movie_id))
+    recommended_posters = []
 
-    return recommended_movies, recommended_movies_posters
+    for i in movies_lists:
+        row = movies_df.iloc[int(i)]
 
+        recommended_movies.append(row.title)
+        recommended_posters.append(
+            fetch_poster(int(row.movie_id))
+        )
 
-movies_dict = pickle.load(open("movies.pkl","rb"))
-movies = pd.DataFrame(movies_dict)
-similarity = pickle.load(open("similarity.pkl", "rb"))
+    return recommended_movies, recommended_posters
+
 
 st.title("Movie Recommender System")
 
-selected_movie_name = st.selectbox(
-    "Select a movie",
-    movies["title"].values,
+selected_movie = st.selectbox(
+    "Search a Movie",
+    options=movie_titles,
+    index=None,
+    placeholder="Search a Movie...",
 )
 
-if st.button("Recommend"):
-    with st.spinner("Fetching recommendations..."):
-        recommendation, posters = recommend(selected_movie_name)
+if st.button(
+    "Recommend",
+    type="primary",
+    use_container_width=True
+):
+    if selected_movie:
+        st.success(
+            f"Top recommendations for: {selected_movie}"
+        )
 
-    cols = st.columns(6)
-    for i in range(6):
-        with cols[i]:
-            st.text(recommendation[i])
-            st.image(posters[i])
+        names, posters = recommend(selected_movie)
+
+        cols = st.columns(5)
+
+        for col, title, poster_url in zip(
+            cols, names, posters
+        ):
+            with col:
+                if poster_url:
+                    try:
+                        st.image(
+                            poster_url,
+                            use_container_width=True
+                        )
+                    except Exception:
+                        try:
+                            small_poster = poster_url.replace(
+                                "/w500/", "/w342/"
+                            )
+                            st.image(
+                                small_poster,
+                                use_container_width=True
+                            )
+                        except Exception:
+                            st.caption("No poster available")
+                else:
+                    st.caption("No poster available")
+
+                st.markdown(f"**{title}**")
+
+    else:
+        st.warning("Please select a movie first.")
